@@ -44,7 +44,7 @@ st.write("")
 # -----------------------------
 # LOAD MODEL
 # -----------------------------
-rf_model = joblib.load("models/rf_model.joblib")
+rf_model = joblib.load("models/rf_model_compat.joblib")
 training_features = joblib.load("models/training_features.joblib")
 
 # -----------------------------
