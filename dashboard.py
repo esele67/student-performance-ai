@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 import joblib
-from fpdf import FPDF
+from fpdf import FPDF   # Works with fpdf2
 from io import BytesIO
 import time
 
@@ -42,7 +42,7 @@ st.markdown('<div class="subtitle">Next-generation student performance analytics
 st.write("")
 
 # -----------------------------
-# SAFE MODEL LOADING (Cloud Safe)
+# SAFE MODEL LOADING
 # -----------------------------
 @st.cache_resource
 def load_model():
@@ -50,8 +50,8 @@ def load_model():
         model = joblib.load("models/rf_model_compat.joblib")
         features = joblib.load("models/training_features.joblib")
         return model, features
-    except Exception:
-        st.error("❌ Model files missing. Check GitHub models/ folder.")
+    except Exception as e:
+        st.error("❌ Model files missing or corrupted.")
         st.stop()
 
 rf_model, training_features = load_model()
@@ -61,37 +61,38 @@ rf_model, training_features = load_model()
 # -----------------------------
 uploaded_file = st.file_uploader("📂 Upload Student CSV File", type="csv")
 
-# -----------------------------
-# IF FILE UPLOADED
-# -----------------------------
 if uploaded_file:
 
-    # 🔥 AI LOADING EFFECT
+    # Loading animation
     with st.spinner("🧠 AI analyzing academic patterns..."):
         progress = st.progress(0)
         for i in range(100):
             time.sleep(0.01)
-            progress.progress(i+1)
+            progress.progress(i + 1)
 
     st.success("AI analysis complete!")
 
     # -----------------------------
     # READ DATA
     # -----------------------------
-    data = pd.read_csv(uploaded_file, sep=';')
+    try:
+        data = pd.read_csv(uploaded_file, sep=';')
+    except Exception:
+        st.error("❌ Error reading CSV file.")
+        st.stop()
 
     st.subheader("📄 Uploaded Data Preview")
     st.dataframe(data.head())
 
-    # Remove real result if exists
+    # Remove G3 if exists
     if "G3" in data.columns:
         data = data.drop("G3", axis=1)
 
-    # Encode categorical
+    # Encode categorical variables
     categorical_cols = data.select_dtypes(include=['object']).columns
     data = pd.get_dummies(data, columns=categorical_cols, drop_first=True)
 
-    # Match training features
+    # Ensure all training columns exist
     missing_cols = set(training_features) - set(data.columns)
     for col in missing_cols:
         data[col] = 0
@@ -114,9 +115,6 @@ if uploaded_file:
 
     data["Risk Level"] = data["Predicted Grade"].apply(risk_label)
 
-    # -----------------------------
-    # AI COMMENTS
-    # -----------------------------
     def explain(row):
         g = row["Predicted Grade"]
         if g < 10:
@@ -140,7 +138,6 @@ if uploaded_file:
     excellent_count = (data["Risk Level"] == "Excellent").sum()
 
     c1, c2, c3, c4 = st.columns(4)
-
     c1.metric("👨‍🎓 Students", total_students)
     c2.metric("⚠️ At Risk", risk_count)
     c3.metric("🏆 Excellent", excellent_count)
@@ -148,29 +145,21 @@ if uploaded_file:
 
     st.divider()
 
-    # -----------------------------
-    # TOP STUDENTS
-    # -----------------------------
+    # Top students
     st.subheader("🏆 Top Performing Students")
     top_students = data.sort_values(by="Predicted Grade", ascending=False).head(5)
     st.dataframe(top_students[["Predicted Grade", "Risk Level"]])
 
-    # -----------------------------
-    # AT RISK STUDENTS
-    # -----------------------------
+    # At risk
     st.subheader("⚠️ Students Needing Attention")
     risk_students = data[data["Risk Level"] == "At Risk"]
     st.dataframe(risk_students[["Predicted Grade", "AI Comment"]])
 
-    # -----------------------------
-    # FULL TABLE
-    # -----------------------------
+    # Full table
     st.subheader("🧠 Full AI Predictions")
     st.dataframe(data)
 
-    # -----------------------------
-    # AI INSIGHTS
-    # -----------------------------
+    # AI Insights
     st.subheader("🤖 AI Insights")
 
     if avg_grade < 10:
@@ -186,7 +175,7 @@ if uploaded_file:
     st.divider()
 
     # -----------------------------
-    # DOWNLOAD UPDATED CSV
+    # DOWNLOAD CSV
     # -----------------------------
     csv = data.to_csv(index=False).encode('utf-8')
 
@@ -198,54 +187,46 @@ if uploaded_file:
     )
 
     # -----------------------------
-    # PDF REPORT
+    # PDF REPORT (Python 3.13 SAFE)
     # -----------------------------
     if st.button("📄 Generate Full AI Report"):
 
-        pdf = FPDF()
-        pdf.add_page()
+        try:
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", "B", 18)
+            pdf.cell(0, 12, "AI Academic Intelligence Report", ln=True, align="C")
+            pdf.ln(8)
 
-        pdf.set_font("Arial", "B", 18)
-        pdf.cell(0, 12, "AI Academic Intelligence Report", ln=True, align="C")
-        pdf.ln(8)
+            pdf.set_font("Arial", "", 12)
+            pdf.cell(0, 8, f"Total Students: {total_students}", ln=True)
+            pdf.cell(0, 8, f"Class Average: {avg_grade:.2f}/20", ln=True)
+            pdf.cell(0, 8, f"At Risk Students: {risk_count}", ln=True)
+            pdf.cell(0, 8, f"Excellent Students: {excellent_count}", ln=True)
+            pdf.ln(8)
 
-        pdf.set_font("Arial", "B", 14)
-        pdf.cell(0, 10, "Class Summary", ln=True)
+            for i, row in data.iterrows():
+                pdf.multi_cell(
+                    0, 7,
+                    f"Student {i+1}\n"
+                    f"Predicted Grade: {row['Predicted Grade']}/20\n"
+                    f"Risk Level: {row['Risk Level']}\n"
+                    f"{row['AI Comment']}"
+                )
+                pdf.ln(2)
 
-        pdf.set_font("Arial", "", 12)
-        pdf.cell(0, 8, f"Total Students: {total_students}", ln=True)
-        pdf.cell(0, 8, f"Class Average: {avg_grade:.2f}/20", ln=True)
-        pdf.cell(0, 8, f"At Risk Students: {risk_count}", ln=True)
-        pdf.cell(0, 8, f"Excellent Students: {excellent_count}", ln=True)
+            pdf_bytes = pdf.output(dest="S").encode("latin-1", "ignore")
+            pdf_buffer = BytesIO(pdf_bytes)
 
-        pdf.ln(10)
-        pdf.set_font("Arial", "B", 14)
-        pdf.cell(0, 10, "Student Predictions", ln=True)
-        pdf.set_font("Arial", "", 11)
-
-        for i, row in data.iterrows():
-            comment = str(row["AI Comment"]).encode("latin-1", "ignore").decode("latin-1")
-
-            pdf.multi_cell(
-                0, 7,
-                f"Student {i+1}\n"
-                f"Predicted Grade: {row['Predicted Grade']}/20\n"
-                f"Risk Level: {row['Risk Level']}\n"
-                f"{comment}"
+            st.download_button(
+                label="⬇️ Download AI PDF Report",
+                data=pdf_buffer,
+                file_name="AI_student_report.pdf",
+                mime="application/pdf"
             )
-            pdf.ln(2)
 
-        pdf_output = pdf.output(dest="S").encode("latin-1")
-        pdf_buffer = BytesIO(pdf_output)
-
-        st.success("Report generated successfully!")
-
-        st.download_button(
-            label="⬇️ Download AI PDF Report",
-            data=pdf_buffer,
-            file_name="AI_student_report.pdf",
-            mime="application/pdf"
-        )
+        except Exception:
+            st.error("❌ PDF generation failed.")
 
 else:
     st.info("👆 Upload a student CSV file to activate the AI system.")
