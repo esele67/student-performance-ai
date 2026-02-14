@@ -1,0 +1,6 @@
+streamlit
+pandas
+joblib
+fpdf
+openpyxl
+numpy
